@@ -19,6 +19,7 @@ const UserDashboard = () => {
   const { socket } = useSocket();
   const [tokens, setTokens] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [confirmCancelId, setConfirmCancelId] = useState(null);
 
   const fetchTokens = async () => {
     try {
@@ -74,10 +75,10 @@ const UserDashboard = () => {
   }, [socket]);
 
   const handleCancel = async (tokenId) => {
-    if (!confirm('Are you sure you want to cancel this token?')) return;
     try {
       await api.put(`/tokens/cancel/${tokenId}`);
       toast.success('Token cancelled.');
+      setConfirmCancelId(null);
       fetchTokens();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to cancel.');
@@ -244,13 +245,31 @@ const UserDashboard = () => {
 
                 <div className="flex gap-2">
                   {token.status === 'waiting' && (
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => handleCancel(token._id)}
-                      id={`cancel-${token.tokenNumber}`}
-                    >
-                      Cancel
-                    </button>
+                    confirmCancelId === token._id ? (
+                      <>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          onClick={() => handleCancel(token._id)}
+                          id={`confirm-cancel-${token.tokenNumber}`}
+                        >
+                          Yes, Cancel
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setConfirmCancelId(null)}
+                        >
+                          Keep
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => setConfirmCancelId(token._id)}
+                        id={`cancel-${token.tokenNumber}`}
+                      >
+                        Cancel
+                      </button>
+                    )
                   )}
                   <Link
                     to={`/queue/${token.serviceId?._id}`}

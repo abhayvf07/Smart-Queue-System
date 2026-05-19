@@ -29,9 +29,9 @@ export const AuthProvider = ({ children }) => {
     loadUser();
   }, [token]);
 
-  const register = useCallback(async (name, email, password, role = 'user') => {
+  const register = useCallback(async (name, email, password) => {
     try {
-      const res = await api.post('/auth/register', { name, email, password, role });
+      const res = await api.post('/auth/register', { name, email, password });
       const { user: userData, token: jwtToken } = res.data.data;
 
       localStorage.setItem('sq_token', jwtToken);

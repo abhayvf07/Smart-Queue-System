@@ -18,19 +18,16 @@ const Analytics = () => {
   const [analytics, setAnalytics] = useState(null);
   const [services, setServices] = useState([]);
   const [selectedService, setSelectedService] = useState('');
-  const [tokens, setTokens] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchAll = async () => {
     try {
-      const [analyticsRes, servicesRes, tokensRes] = await Promise.all([
+      const [analyticsRes, servicesRes] = await Promise.all([
         api.get(`/admin/analytics${selectedService ? `?serviceId=${selectedService}` : ''}`),
         api.get('/services'),
-        api.get('/admin/tokens?limit=50'),
       ]);
       setAnalytics(analyticsRes.data.data);
       setServices(servicesRes.data.data.services);
-      setTokens(tokensRes.data.data.tokens);
     } catch (err) {
       console.error('Analytics fetch error:', err);
     } finally {
@@ -42,25 +39,10 @@ const Analytics = () => {
     fetchAll();
   }, [selectedService]);
 
-  // Calculate status distribution
-  const statusCounts = tokens.reduce(
-    (acc, t) => {
-      acc[t.status] = (acc[t.status] || 0) + 1;
-      return acc;
-    },
-    {}
-  );
-
-  // Calculate priority distribution
-  const priorityCounts = tokens.reduce(
-    (acc, t) => {
-      acc[t.priority] = (acc[t.priority] || 0) + 1;
-      return acc;
-    },
-    {}
-  );
-
-  const totalTokens = tokens.length;
+  // Use server-side aggregated counts (accurate for all tokens, not just latest 50)
+  const statusCounts = analytics?.statusCounts || {};
+  const priorityCounts = analytics?.priorityCounts || {};
+  const totalTokens = analytics?.totalTokensToday || 0;
 
   // Bar chart helpers — simple CSS-based chart
   const StatusBar = ({ label, count, total, color }) => {

@@ -44,43 +44,29 @@ const LiveDisplay = () => {
 
   // Real-time for all services
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || services.length === 0) return;
 
     services.forEach((s) => {
       socket.emit('join:service', s._id);
       socket.emit('join:display', s._id);
     });
 
-    const handleQueueUpdate = (serviceId) => (data) => {
-      setQueues((prev) => ({
-        ...prev,
-        [serviceId]: { ...prev[serviceId], queue: data },
-      }));
-    };
-
-    const handleDisplayUpdate = (data) => {
-      if (data.queue && data.stats) {
-        // Update will come through queue:update
+    // ONE listener, OUTSIDE the forEach — prevents N duplicate listeners
+    const handleQueueUpdate = (data) => {
+      if (data.length > 0 && data[0].serviceId) {
+        const sid = data[0].serviceId._id || data[0].serviceId;
+        setQueues((prev) => ({
+          ...prev,
+          [sid]: { ...prev[sid], queue: data },
+        }));
       }
     };
 
-    services.forEach((s) => {
-      socket.on('queue:update', (data) => {
-        // Try to figure out which service this is for
-        if (data.length > 0 && data[0].serviceId) {
-          const sid = data[0].serviceId._id || data[0].serviceId;
-          setQueues((prev) => ({
-            ...prev,
-            [sid]: { ...prev[sid], queue: data },
-          }));
-        }
-      });
-    });
+    socket.on('queue:update', handleQueueUpdate);
 
     return () => {
-      services.forEach((s) => {
-        socket.emit('leave:service', s._id);
-      });
+      services.forEach((s) => socket.emit('leave:service', s._id));
+      socket.off('queue:update', handleQueueUpdate); // exact same ref for proper cleanup
     };
   }, [socket, services]);
 

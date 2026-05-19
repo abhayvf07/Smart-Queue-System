@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { Types } = require('mongoose');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
@@ -29,18 +30,21 @@ const setupSocket = (io) => {
 
     // Join a service's queue room
     socket.on('join:service', (serviceId) => {
+      if (!Types.ObjectId.isValid(serviceId)) return;
       socket.join(`service:${serviceId}`);
       logger.debug(`Socket ${socket.id} joined service:${serviceId}`);
     });
 
     // Leave a service's queue room
     socket.on('leave:service', (serviceId) => {
+      if (!Types.ObjectId.isValid(serviceId)) return;
       socket.leave(`service:${serviceId}`);
       logger.debug(`Socket ${socket.id} left service:${serviceId}`);
     });
 
     // Join live display room
     socket.on('join:display', (serviceId) => {
+      if (!Types.ObjectId.isValid(serviceId)) return;
       socket.join(`display:${serviceId}`);
       logger.debug(`Socket ${socket.id} joined display:${serviceId}`);
     });

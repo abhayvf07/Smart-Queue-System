@@ -1,5 +1,6 @@
 const Token = require('../models/Token');
 const Service = require('../models/Service');
+const mongoose = require('mongoose');
 const { generateTokenNumber } = require('../utils/tokenGenerator');
 const { cacheGet, cacheSet, cacheDel } = require('../config/redis');
 const ApiError = require('../utils/ApiError');
@@ -15,15 +16,27 @@ const getQueueForService = async (serviceId) => {
   const cached = await cacheGet(cacheKey);
   if (cached) return cached;
 
-  // Fetch from DB — emergency first, then by creation time
-  const queue = await Token.find({
-    serviceId,
-    status: { $in: ['waiting', 'serving'] },
-  })
-    .sort({ status: 1, priority: -1, createdAt: 1 }) // serving first, then emergency, then FIFO
-    .populate('userId', 'name email')
-    .populate('serviceId', 'name prefix')
-    .lean();
+  // Fetch serving and waiting separately — avoids fragile alphabetical sort on status
+  const [servingTokens, waitingTokens] = await Promise.all([
+    Token.find({ serviceId, status: 'serving' })
+      .populate('userId', 'name email')
+      .populate('serviceId', 'name prefix')
+      .lean(),
+    Token.find({ serviceId, status: 'waiting' })
+      .sort({ createdAt: 1 })
+      .populate('userId', 'name email')
+      .populate('serviceId', 'name prefix')
+      .lean(),
+  ]);
+
+  // Sort waiting: emergency first (stable), then FIFO (already sorted by createdAt)
+  waitingTokens.sort((a, b) => {
+    if (a.priority === 'emergency' && b.priority !== 'emergency') return -1;
+    if (a.priority !== 'emergency' && b.priority === 'emergency') return 1;
+    return 0; // preserve createdAt order from DB sort
+  });
+
+  const queue = [...servingTokens, ...waitingTokens];
 
   // Cache for 10 seconds
   await cacheSet(cacheKey, queue, 10);
@@ -54,7 +67,7 @@ const getQueueStats = async (serviceId) => {
   const avgWaitResult = await Token.aggregate([
     {
       $match: {
-        serviceId: require('mongoose').Types.ObjectId.createFromHexString(serviceId.toString()),
+        serviceId: mongoose.Types.ObjectId.createFromHexString(serviceId.toString()),
         status: 'completed',
         calledAt: { $ne: null },
         completedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
@@ -88,28 +101,29 @@ const getQueueStats = async (serviceId) => {
 const getTokenPosition = async (token) => {
   if (token.status !== 'waiting') return 0;
 
-  // Count tokens ahead: emergency first, then by createdAt
-  const aheadCount = await Token.countDocuments({
-    serviceId: token.serviceId,
-    status: 'waiting',
-    $or: [
-      { priority: 'emergency', createdAt: { $lt: token.createdAt } },
-      {
-        priority: 'emergency',
-        ...(token.priority !== 'emergency' ? {} : { createdAt: { $lt: token.createdAt } }),
-      },
-      ...(token.priority !== 'emergency'
-        ? [
-            { priority: 'emergency' }, // All emergency tokens are ahead of normal
-            {
-              priority: 'normal',
-              createdAt: { $lt: token.createdAt },
-            },
-          ]
-        : []),
-    ],
-  });
+  let aheadQuery;
 
+  if (token.priority === 'emergency') {
+    // Emergency token: only other emergency tokens created before this one are ahead
+    aheadQuery = {
+      serviceId: token.serviceId,
+      status: 'waiting',
+      priority: 'emergency',
+      createdAt: { $lt: token.createdAt },
+    };
+  } else {
+    // Normal token: ALL emergency tokens are ahead + normal tokens created before this one
+    aheadQuery = {
+      serviceId: token.serviceId,
+      status: 'waiting',
+      $or: [
+        { priority: 'emergency' },
+        { priority: 'normal', createdAt: { $lt: token.createdAt } },
+      ],
+    };
+  }
+
+  const aheadCount = await Token.countDocuments(aheadQuery);
   return aheadCount + 1; // 1-based position
 };
 
@@ -166,17 +180,25 @@ const callNextToken = async (serviceId) => {
     { status: 'completed', completedAt: new Date() }
   );
 
-  // Find next: emergency first, then FIFO
-  const nextToken = await Token.findOneAndUpdate(
-    { serviceId, status: 'waiting' },
+  // Find next: try emergency tokens first (FIFO within priority)
+  let nextToken = await Token.findOneAndUpdate(
+    { serviceId, status: 'waiting', priority: 'emergency' },
     { status: 'serving', calledAt: new Date() },
-    {
-      new: true,
-      sort: { priority: -1, createdAt: 1 }, // -1 means 'emergency' > 'normal'
-    }
+    { new: true, sort: { createdAt: 1 } }
   )
     .populate('userId', 'name email')
     .populate('serviceId', 'name prefix');
+
+  // If no emergency token, find normal
+  if (!nextToken) {
+    nextToken = await Token.findOneAndUpdate(
+      { serviceId, status: 'waiting' },
+      { status: 'serving', calledAt: new Date() },
+      { new: true, sort: { createdAt: 1 } }
+    )
+      .populate('userId', 'name email')
+      .populate('serviceId', 'name prefix');
+  }
 
   if (!nextToken) {
     throw new ApiError(404, 'No waiting tokens in queue.');
@@ -244,7 +266,7 @@ const getAnalytics = async (serviceId) => {
     completedAt: { $gte: today },
   };
   if (serviceId) {
-    matchStage.serviceId = require('mongoose').Types.ObjectId.createFromHexString(serviceId.toString());
+    matchStage.serviceId = mongoose.Types.ObjectId.createFromHexString(serviceId.toString());
   }
 
   const [metrics, peakHours] = await Promise.all([
@@ -281,6 +303,41 @@ const getAnalytics = async (serviceId) => {
   };
 };
 
+/**
+ * Cancel all expired waiting tokens.
+ * Called periodically via setInterval in index.js.
+ */
+const cancelExpiredTokens = async () => {
+  try {
+    const now = new Date();
+
+    // Find expired tokens to get their serviceIds for cache invalidation
+    const expiredTokens = await Token.find({
+      status: 'waiting',
+      expiresAt: { $lt: now },
+    }).select('serviceId').lean();
+
+    if (expiredTokens.length === 0) return;
+
+    // Cancel all expired tokens
+    await Token.updateMany(
+      { status: 'waiting', expiresAt: { $lt: now } },
+      { status: 'cancelled' }
+    );
+
+    // Invalidate Redis cache for each affected service
+    const affectedServices = [...new Set(expiredTokens.map((t) => t.serviceId.toString()))];
+    for (const sid of affectedServices) {
+      await cacheDel(`queue:${sid}`);
+      await cacheDel(`stats:${sid}`);
+    }
+
+    logger.info(`Auto-cancelled ${expiredTokens.length} expired token(s) across ${affectedServices.length} service(s)`);
+  } catch (error) {
+    logger.error(`Failed to cancel expired tokens: ${error.message}`);
+  }
+};
+
 module.exports = {
   getQueueForService,
   getQueueStats,
@@ -290,4 +347,5 @@ module.exports = {
   skipToken,
   cancelToken,
   getAnalytics,
+  cancelExpiredTokens,
 };

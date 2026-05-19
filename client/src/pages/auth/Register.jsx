@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { User, Mail, Lock, Eye, EyeOff, UserPlus, AlertCircle, ShieldCheck } from 'lucide-react';
+import { User, Mail, Lock, Eye, EyeOff, UserPlus, AlertCircle } from 'lucide-react';
 
 const Register = () => {
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -59,9 +59,9 @@ const Register = () => {
 
     setLoading(true);
     try {
-      const result = await register(form.name.trim(), form.email, form.password, form.role);
+      const result = await register(form.name.trim(), form.email, form.password);
       if (result.success) {
-        navigate(form.role === 'admin' ? '/admin' : '/dashboard', { replace: true });
+        navigate('/dashboard', { replace: true });
       } else {
         setServerError(result.message);
       }
@@ -188,19 +188,7 @@ const Register = () => {
               )}
             </div>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="register-role">Account Type</label>
-              <select
-                id="register-role"
-                name="role"
-                className="form-input form-select"
-                value={form.role}
-                onChange={handleChange}
-              >
-                <option value="user">👤 User — Book & track queue tokens</option>
-                <option value="admin">🛡️ Admin — Manage queues & services</option>
-              </select>
-            </div>
+
 
             <button
               type="submit"

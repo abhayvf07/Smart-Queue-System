@@ -6,12 +6,20 @@ const Service = require('./src/models/Service');
 
 const seedData = async () => {
   try {
+    // Safety check — prevent accidental data wipe in production
+    if (process.env.NODE_ENV === 'production') {
+      console.error('❌ Cannot run seed in production environment!');
+      process.exit(1);
+    }
+
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('Connected to MongoDB');
 
     // Clear existing data
     await User.deleteMany({});
     await Service.deleteMany({});
+    // Also clear counters so token numbering restarts from 1
+    await mongoose.connection.collection('counters').deleteMany({});
 
     // Create admin user
     const admin = await User.create({

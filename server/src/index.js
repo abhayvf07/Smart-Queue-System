@@ -12,6 +12,7 @@ const { apiLimiter } = require('./middleware/rateLimiter');
 const errorHandler = require('./middleware/errorHandler');
 const setupSocket = require('./socket/socketHandler');
 const { initNotificationService } = require('./services/notification.service');
+const { cancelExpiredTokens } = require('./services/queue.service');
 const logger = require('./utils/logger');
 
 // Routes
@@ -96,6 +97,10 @@ const startServer = async () => {
       logger.info(`📡 Socket.IO ready for connections`);
       logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
     });
+
+    // Auto-cancel expired tokens every 60 seconds
+    setInterval(cancelExpiredTokens, 60 * 1000);
+    logger.info('⏱️  Expired token cleanup scheduled (every 60s)');
   } catch (error) {
     logger.error(`Failed to start server: ${error.message}`);
     process.exit(1);

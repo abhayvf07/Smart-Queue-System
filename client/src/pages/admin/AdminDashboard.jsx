@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../api/axios';
+import { useSocket } from '../../context/SocketContext';
 import {
   Users,
   Clock,
@@ -16,24 +17,41 @@ const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
   const [recentTokens, setRecentTokens] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { socket } = useSocket();
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [analyticsRes, tokensRes] = await Promise.all([
+        api.get('/admin/analytics'),
+        api.get('/admin/tokens?limit=5'),
+      ]);
+      setStats(analyticsRes.data.data);
+      setRecentTokens(tokensRes.data.data.tokens);
+    } catch (err) {
+      console.error('Error fetching admin data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [analyticsRes, tokensRes] = await Promise.all([
-          api.get('/admin/analytics'),
-          api.get('/admin/tokens?limit=5'),
-        ]);
-        setStats(analyticsRes.data.data);
-        setRecentTokens(tokensRes.data.data.tokens);
-      } catch (err) {
-        console.error('Error fetching admin data:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchData();
-  }, []);
+  }, [fetchData]);
+
+  // Real-time updates — refresh dashboard when queue changes
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleUpdate = () => fetchData();
+
+    socket.on('queue:update', handleUpdate);
+    socket.on('queue:stats', handleUpdate);
+
+    return () => {
+      socket.off('queue:update', handleUpdate);
+      socket.off('queue:stats', handleUpdate);
+    };
+  }, [socket, fetchData]);
 
   const getStatusBadge = (status) => {
     const map = {

@@ -23,26 +23,26 @@ A scalable system designed to eliminate long waiting queues in **hospitals and g
 
 ### 🔐 Authentication (Login / Register)
 
-![Login Page](./screenshots/login.png)
-![Register Page](./screenshots/register.png)
+![Login Page](./Screenshots/Login_Page.png)
+![Register Page](./Screenshots/Register_Page.png)
 
 ### 👤 User Dashboard
 
-![User Dashboard](./screenshots/user-dashboard.png)
-![Book Token](./screenshots/book-token.png)
+![User Dashboard](./Screenshots/User_Dashboard.png)
+![Book Token](./Screenshots/Book_Token.png)
 
 ### 📊 Live Queue Tracking
 
-![Queue Status](./screenshots/queue-status.png)
+![Queue Status](./Screenshots/Queue_Status.png)
 
 ### 🛠️ Admin Dashboard
 
-![Admin Dashboard](./screenshots/admin-dashboard.png)
-![Manage Tokens](./screenshots/manage-tokens.png)
+![Admin Dashboard](./Screenshots/Admin_Dashboard.png)
+![Manage Tokens](./Screenshots/Manage_Tokens.png)
 
 ### 📺 Live Display Screen
 
-![Live Display](./screenshots/live-display.png)
+![Live Display](./Screenshots/Live_Display.png)
 
 ---
 

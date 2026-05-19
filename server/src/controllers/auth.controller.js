@@ -16,7 +16,7 @@ const generateJWT = (id) => {
  */
 const register = async (req, res, next) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password } = req.body;
 
     // Validate required fields
     if (!name || !email || !password) {
@@ -50,7 +50,7 @@ const register = async (req, res, next) => {
       name,
       email: email.toLowerCase(),
       password,
-      role: role === 'admin' ? 'admin' : 'user',
+      role: 'user',
     });
 
     // Generate token

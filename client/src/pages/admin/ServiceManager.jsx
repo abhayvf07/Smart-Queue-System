@@ -19,6 +19,7 @@ const ServiceManager = () => {
   const [form, setForm] = useState({ name: '', description: '', prefix: '', capacityPerHour: 20 });
   const [formErrors, setFormErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const fetchServices = async () => {
     try {
@@ -90,10 +91,10 @@ const ServiceManager = () => {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm('Deactivate this service?')) return;
     try {
       await api.delete(`/services/${id}`);
       toast.success('Service deactivated.');
+      setConfirmDeleteId(null);
       fetchServices();
     } catch (err) {
       toast.error('Failed to deactivate.');
@@ -151,12 +152,29 @@ const ServiceManager = () => {
                 >
                   <Edit3 size={14} /> Edit
                 </button>
-                <button
-                  className="btn btn-danger btn-sm"
-                  onClick={() => handleDelete(service._id)}
-                >
-                  <Trash2 size={14} /> Deactivate
-                </button>
+                {confirmDeleteId === service._id ? (
+                  <>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleDelete(service._id)}
+                    >
+                      Yes, Deactivate
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setConfirmDeleteId(null)}
+                    >
+                      Keep
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={() => setConfirmDeleteId(service._id)}
+                  >
+                    <Trash2 size={14} /> Deactivate
+                  </button>
+                )}
               </div>
             </div>
           ))}

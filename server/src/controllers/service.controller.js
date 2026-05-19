@@ -66,7 +66,35 @@ const createService = async (req, res, next) => {
  */
 const updateService = async (req, res, next) => {
   try {
-    const service = await Service.findByIdAndUpdate(req.params.id, req.body, {
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      throw new ApiError(400, 'Invalid service ID.');
+    }
+
+    // Whitelist allowed fields — prevents mass-assignment
+    const { name, description, prefix, capacityPerHour, active } = req.body;
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (prefix !== undefined) {
+      updateData.prefix = prefix.toUpperCase();
+      // Check for duplicate prefix (excluding current service)
+      const existing = await Service.findOne({
+        prefix: updateData.prefix,
+        _id: { $ne: req.params.id },
+      });
+      if (existing) {
+        throw new ApiError(400, `A service with prefix "${updateData.prefix}" already exists.`);
+      }
+    }
+    if (capacityPerHour !== undefined) updateData.capacityPerHour = capacityPerHour;
+    if (active !== undefined) updateData.active = active;
+
+    if (Object.keys(updateData).length === 0) {
+      throw new ApiError(400, 'No valid fields to update.');
+    }
+
+    const service = await Service.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true,
     });

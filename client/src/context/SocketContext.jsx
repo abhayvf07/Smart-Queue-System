@@ -7,7 +7,7 @@ const SocketContext = createContext(null);
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
-  const { token, isAuthenticated } = useAuth();
+  const { token } = useAuth();
 
   useEffect(() => {
     // Connect socket

@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Token = require('../models/Token');
 const queueService = require('../services/queue.service');
 const notificationService = require('../services/notification.service');
@@ -12,9 +13,22 @@ const getAllTokens = async (req, res, next) => {
     const { status, serviceId, priority, page = 1, limit = 20 } = req.query;
     const filter = {};
 
-    if (status) filter.status = status;
-    if (serviceId) filter.serviceId = serviceId;
-    if (priority) filter.priority = priority;
+    // Whitelist validation to prevent NoSQL injection
+    const validStatuses = ['waiting', 'serving', 'completed', 'cancelled', 'skipped'];
+    const validPriorities = ['normal', 'emergency'];
+
+    if (status) {
+      if (!validStatuses.includes(status)) throw new ApiError(400, 'Invalid status filter.');
+      filter.status = status;
+    }
+    if (serviceId) {
+      if (!mongoose.Types.ObjectId.isValid(serviceId)) throw new ApiError(400, 'Invalid service ID.');
+      filter.serviceId = serviceId;
+    }
+    if (priority) {
+      if (!validPriorities.includes(priority)) throw new ApiError(400, 'Invalid priority filter.');
+      filter.priority = priority;
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -53,6 +67,11 @@ const getAllTokens = async (req, res, next) => {
 const callNext = async (req, res, next) => {
   try {
     const { serviceId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(serviceId)) {
+      throw new ApiError(400, 'Invalid service ID.');
+    }
+
     const calledToken = await queueService.callNextToken(serviceId);
 
     // Notify the user whose token was called
@@ -102,6 +121,10 @@ const updateTokenStatus = async (req, res, next) => {
     const { tokenId } = req.params;
     const { status } = req.body;
 
+    if (!mongoose.Types.ObjectId.isValid(tokenId)) {
+      throw new ApiError(400, 'Invalid Token ID format.');
+    }
+
     if (!['waiting', 'serving', 'completed', 'skipped'].includes(status)) {
       throw new ApiError(400, 'Invalid status.');
     }
@@ -147,6 +170,14 @@ const createEmergencyToken = async (req, res, next) => {
       throw new ApiError(400, 'Service ID is required.');
     }
 
+    if (!mongoose.Types.ObjectId.isValid(serviceId)) {
+      throw new ApiError(400, 'Invalid service ID.');
+    }
+
+    if (userId && !mongoose.Types.ObjectId.isValid(userId)) {
+      throw new ApiError(400, 'Invalid User ID format.');
+    }
+
     // Use the requesting admin's ID if no userId provided
     const targetUserId = userId || req.user._id;
 
@@ -178,49 +209,68 @@ const getAnalytics = async (req, res, next) => {
     const analytics = await queueService.getAnalytics(serviceId);
 
     // Also get service-wise breakdown
-    const Token2 = require('../models/Token');
     const today = new Date(new Date().setHours(0, 0, 0, 0));
 
-    const serviceBreakdown = await Token2.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: today },
+    const [serviceBreakdown, statusCounts, priorityCounts] = await Promise.all([
+      Token.aggregate([
+        { $match: { createdAt: { $gte: today } } },
+        {
+          $group: {
+            _id: { serviceId: '$serviceId', status: '$status' },
+            count: { $sum: 1 },
+          },
         },
-      },
-      {
-        $group: {
-          _id: { serviceId: '$serviceId', status: '$status' },
-          count: { $sum: 1 },
+        {
+          $lookup: {
+            from: 'services',
+            localField: '_id.serviceId',
+            foreignField: '_id',
+            as: 'service',
+          },
         },
-      },
-      {
-        $lookup: {
-          from: 'services',
-          localField: '_id.serviceId',
-          foreignField: '_id',
-          as: 'service',
-        },
-      },
-      { $unwind: '$service' },
-      {
-        $group: {
-          _id: '$_id.serviceId',
-          serviceName: { $first: '$service.name' },
-          statuses: {
-            $push: {
-              status: '$_id.status',
-              count: '$count',
+        { $unwind: '$service' },
+        {
+          $group: {
+            _id: '$_id.serviceId',
+            serviceName: { $first: '$service.name' },
+            statuses: {
+              $push: {
+                status: '$_id.status',
+                count: '$count',
+              },
             },
           },
         },
-      },
+      ]),
+      // Aggregate status counts for all today's tokens
+      Token.aggregate([
+        { $match: { createdAt: { $gte: today } } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      // Aggregate priority counts for all today's tokens
+      Token.aggregate([
+        { $match: { createdAt: { $gte: today } } },
+        { $group: { _id: '$priority', count: { $sum: 1 } } },
+      ]),
     ]);
+
+    // Convert array results to objects for easier frontend consumption
+    const statusCountsObj = {};
+    statusCounts.forEach((s) => { statusCountsObj[s._id] = s.count; });
+
+    const priorityCountsObj = {};
+    priorityCounts.forEach((p) => { priorityCountsObj[p._id] = p.count; });
+
+    const totalTokensToday = Object.values(statusCountsObj).reduce((sum, c) => sum + c, 0);
 
     res.status(200).json({
       success: true,
       data: {
         ...analytics,
         serviceBreakdown,
+        statusCounts: statusCountsObj,
+        priorityCounts: priorityCountsObj,
+        totalTokensToday,
       },
     });
   } catch (error) {
