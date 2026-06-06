@@ -7,19 +7,20 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 
 const connectDB = require('./config/db');
-const { connectRedis } = require('./config/redis');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const errorHandler = require('./middleware/errorHandler');
 const setupSocket = require('./socket/socketHandler');
 const { initNotificationService } = require('./services/notification.service');
-const { cancelExpiredTokens } = require('./services/queue.service');
+const { cancelExpiredTokens, getQueueForService, getQueueStats, queueEvents } = require('./services/queue.service');
+const notificationService = require('./services/notification.service');
 const logger = require('./utils/logger');
 
-// Routes
 const authRoutes = require('./routes/auth.routes');
 const tokenRoutes = require('./routes/token.routes');
 const adminRoutes = require('./routes/admin.routes');
 const serviceRoutes = require('./routes/service.routes');
+const chatbotRoutes = require('./routes/chatbot.routes');
+const predictionRoutes = require('./routes/prediction.routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -41,11 +42,28 @@ initNotificationService(io);
 // Setup Socket.IO
 setupSocket(io);
 
+// Listen for expired token events and broadcast updates (decoupled from queue.service)
+queueEvents.on('tokensExpired', async (serviceIds) => {
+  for (const sId of serviceIds) {
+    try {
+      const queue = await getQueueForService(sId);
+      const stats = await getQueueStats(sId);
+      notificationService.broadcastQueueUpdate(sId, queue);
+      notificationService.broadcastQueueStats(sId, stats);
+      notificationService.broadcastLiveDisplay(sId, { queue, stats });
+    } catch (err) {
+      logger.error(`Failed to broadcast expired token update for service ${sId}: ${err.message}`);
+    }
+  }
+});
+
 // Make io accessible in routes via req.io
 app.set('io', io);
 
 // Middleware
-app.use(helmet());
+app.use(helmet({
+    crossOriginResourcePolicy: false,
+  }));
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true,
@@ -60,6 +78,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tokens', tokenRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/services', serviceRoutes);
+app.use('/api/chatbot', chatbotRoutes);
+app.use('/api/predictions', predictionRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -84,13 +104,12 @@ app.use(errorHandler);
 // Start server
 const PORT = process.env.PORT || 5000;
 
+let cleanupInterval;
+
 const startServer = async () => {
   try {
     // Connect to MongoDB
     await connectDB();
-
-    // Connect to Redis (graceful — won't crash if unavailable)
-    connectRedis();
 
     server.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`);
@@ -99,7 +118,7 @@ const startServer = async () => {
     });
 
     // Auto-cancel expired tokens every 60 seconds
-    setInterval(cancelExpiredTokens, 60 * 1000);
+    cleanupInterval = setInterval(cancelExpiredTokens, 60 * 1000);
     logger.info('⏱️  Expired token cleanup scheduled (every 60s)');
   } catch (error) {
     logger.error(`Failed to start server: ${error.message}`);
@@ -112,6 +131,7 @@ startServer();
 // Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
+  clearInterval(cleanupInterval);
   server.close(() => {
     process.exit(0);
   });

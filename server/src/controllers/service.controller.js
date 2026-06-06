@@ -1,5 +1,8 @@
+const mongoose = require('mongoose');
 const Service = require('../models/Service');
 const ApiError = require('../utils/ApiError');
+const recommendationService = require('../services/recommendation.service');
+const classificationService = require('../services/classification.service');
 
 /**
  * GET /api/services
@@ -66,7 +69,6 @@ const createService = async (req, res, next) => {
  */
 const updateService = async (req, res, next) => {
   try {
-    const mongoose = require('mongoose');
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       throw new ApiError(400, 'Invalid service ID.');
     }
@@ -135,4 +137,42 @@ const deleteService = async (req, res, next) => {
   }
 };
 
-module.exports = { getServices, createService, updateService, deleteService };
+/**
+ * GET /api/services/recommend
+ * Get ranked services by queue density / congestion
+ */
+const getRecommendedServices = async (req, res, next) => {
+  try {
+    const recommendations = await recommendationService.getRecommendedService();
+    res.status(200).json({
+      success: true,
+      data: { recommendations },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/services/classify
+ * AI-powered service classification and suggestion (admin only)
+ */
+const classifyServiceEndpoint = async (req, res, next) => {
+  try {
+    const { name, description } = req.body;
+    if (!name) {
+      throw new ApiError(400, 'Service name is required for classification.');
+    }
+
+    const classification = await classificationService.classifyService(name, description);
+
+    res.status(200).json({
+      success: true,
+      data: { classification },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getServices, createService, updateService, deleteService, getRecommendedServices, classifyServiceEndpoint };

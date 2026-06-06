@@ -24,16 +24,18 @@ const LiveDisplay = () => {
         const serviceList = res.data.data.services;
         setServices(serviceList);
 
-        // Fetch queue for each service
+        // Fetch queue for each service in parallel
         const queueData = {};
-        for (const s of serviceList) {
-          try {
-            const qRes = await api.get(`/tokens/queue-status/${s._id}`);
-            queueData[s._id] = qRes.data.data;
-          } catch {
-            queueData[s._id] = { queue: [], stats: {} };
-          }
-        }
+        await Promise.all(
+          serviceList.map(async (s) => {
+            try {
+              const qRes = await api.get(`/tokens/queue-status/${s._id}`);
+              queueData[s._id] = qRes.data.data;
+            } catch {
+              queueData[s._id] = { queue: [], stats: {} };
+            }
+          })
+        );
         setQueues(queueData);
       } catch (err) {
         console.error(err);

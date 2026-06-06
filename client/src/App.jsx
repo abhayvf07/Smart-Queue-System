@@ -1,7 +1,9 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
+import ChatBot from './components/ChatBot';
 
 // Layout
 import Navbar from './components/layout/Navbar';
@@ -16,6 +18,7 @@ import Register from './pages/auth/Register';
 import UserDashboard from './pages/user/UserDashboard';
 import BookToken from './pages/user/BookToken';
 import QueueTracker from './pages/user/QueueTracker';
+import TokenHistory from './pages/user/TokenHistory';
 
 // Admin pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -28,6 +31,11 @@ import LiveDisplay from './pages/display/LiveDisplay';
 
 const AppLayout = () => {
   const { isAuthenticated, isAdmin, loading } = useAuth();
+  const location = useLocation();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
+  const closeSidebar = () => setIsSidebarOpen(false);
 
   if (loading) {
     return (
@@ -58,7 +66,7 @@ const AppLayout = () => {
         <Route path="/dashboard" element={
           <ProtectedRoute requiredRole="user">
             <div className="app-layout">
-              <Navbar />
+              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
               <main className="main-content no-sidebar">
                 <UserDashboard />
               </main>
@@ -68,9 +76,19 @@ const AppLayout = () => {
         <Route path="/book-token" element={
           <ProtectedRoute requiredRole="user">
             <div className="app-layout">
-              <Navbar />
+              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
               <main className="main-content no-sidebar">
                 <BookToken />
+              </main>
+            </div>
+          </ProtectedRoute>
+        } />
+        <Route path="/history" element={
+          <ProtectedRoute requiredRole="user">
+            <div className="app-layout">
+              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
+              <main className="main-content no-sidebar">
+                <TokenHistory />
               </main>
             </div>
           </ProtectedRoute>
@@ -78,7 +96,7 @@ const AppLayout = () => {
         <Route path="/queue/:serviceId" element={
           <ProtectedRoute requiredRole="user">
             <div className="app-layout">
-              <Navbar />
+              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
               <main className="main-content no-sidebar">
                 <QueueTracker />
               </main>
@@ -90,8 +108,8 @@ const AppLayout = () => {
         <Route path="/admin" element={
           <ProtectedRoute requiredRole="admin">
             <div className="app-layout">
-              <Sidebar />
-              <Navbar />
+              <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
+              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
               <main className="main-content">
                 <AdminDashboard />
               </main>
@@ -101,8 +119,8 @@ const AppLayout = () => {
         <Route path="/admin/queue" element={
           <ProtectedRoute requiredRole="admin">
             <div className="app-layout">
-              <Sidebar />
-              <Navbar />
+              <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
+              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
               <main className="main-content">
                 <QueueControl />
               </main>
@@ -112,8 +130,8 @@ const AppLayout = () => {
         <Route path="/admin/services" element={
           <ProtectedRoute requiredRole="admin">
             <div className="app-layout">
-              <Sidebar />
-              <Navbar />
+              <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
+              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
               <main className="main-content">
                 <ServiceManager />
               </main>
@@ -123,8 +141,8 @@ const AppLayout = () => {
         <Route path="/admin/analytics" element={
           <ProtectedRoute requiredRole="admin">
             <div className="app-layout">
-              <Sidebar />
-              <Navbar />
+              <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
+              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
               <main className="main-content">
                 <Analytics />
               </main>
@@ -140,6 +158,7 @@ const AppLayout = () => {
         } />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      {isAuthenticated && !location.pathname.includes('/display') && <ChatBot />}
     </SocketProvider>
   );
 };

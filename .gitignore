@@ -105,3 +105,9 @@ out/
 # ESLint cache
 # =========================
 .eslintcache
+
+# =========================
+# Project-specific / Temporary
+# =========================
+/package-lock.json
+server/test_gemini.js

@@ -11,6 +11,7 @@ import {
   Plus,
   ArrowRight,
   RefreshCw,
+  Users,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -104,46 +105,58 @@ const UserDashboard = () => {
         <p>Track your queue position and manage your tokens</p>
       </div>
 
-      {/* Quick Stats */}
-      <div className="stats-grid">
-        <div className="stat-card primary">
-          <div className="stat-icon primary">
-            <Ticket size={22} />
-          </div>
-          <div>
-            <div className="stat-value">{tokens.length}</div>
-            <div className="stat-label">Active Tokens</div>
-          </div>
+      {loading ? (
+        <div className="flex justify-center" style={{ padding: 40 }}>
+          <div className="spinner"></div>
         </div>
-        <div className="stat-card warning">
-          <div className="stat-icon warning">
-            <Clock size={22} />
-          </div>
-          <div>
-            <div className="stat-value">
-              {tokens.filter((t) => t.status === 'waiting').length}
+      ) : (
+        <>
+          {/* Quick Stats */}
+          <div className="stats-grid">
+            <div className="stat-card primary">
+              <div className="stat-icon primary">
+                <Ticket size={22} />
+              </div>
+              <div>
+                <div className="stat-value">{tokens.length}</div>
+                <div className="stat-label">Active Tokens</div>
+              </div>
             </div>
-            <div className="stat-label">In Queue</div>
-          </div>
-        </div>
-        <div className="stat-card success">
-          <div className="stat-icon success">
-            <CheckCircle2 size={22} />
-          </div>
-          <div>
-            <div className="stat-value">
-              {tokens.filter((t) => t.status === 'serving').length}
+            <div className="stat-card warning">
+              <div className="stat-icon warning">
+                <Clock size={22} />
+              </div>
+              <div>
+                <div className="stat-value">
+                  {tokens.filter((t) => t.status === 'waiting').length}
+                </div>
+                <div className="stat-label">In Queue</div>
+              </div>
             </div>
-            <div className="stat-label">Being Served</div>
+            <div className="stat-card success">
+              <div className="stat-icon success">
+                <CheckCircle2 size={22} />
+              </div>
+              <div>
+                <div className="stat-value">
+                  {tokens.filter((t) => t.status === 'serving').length}
+                </div>
+                <div className="stat-label">Being Served</div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
 
       {/* Action buttons */}
-      <div className="flex gap-3 mb-6">
+      <div className="flex gap-3 mb-6 flex-wrap">
         <Link to="/book-token" className="btn btn-primary" id="book-token-btn">
           <Plus size={18} />
           Book New Token
+        </Link>
+        <Link to="/history" className="btn btn-ghost">
+          <Clock size={16} />
+          View History
         </Link>
         <button className="btn btn-ghost" onClick={fetchTokens} id="refresh-btn">
           <RefreshCw size={16} />
@@ -178,70 +191,49 @@ const UserDashboard = () => {
             {tokens.map((token) => (
               <div
                 key={token._id}
-                className={`token-card ${token.status === 'serving' ? 'serving' : ''} ${
-                  token.priority === 'emergency' ? 'emergency' : ''
-                }`}
+                className={`token-card p-5 border rounded-xl relative ${token.status === 'serving' ? 'border-green-500 ring-2 ring-green-500/50 animate-pulse' : 'border-slate-200/20'}`}
                 id={`token-${token.tokenNumber}`}
               >
-                <div className="flex justify-between items-center mb-2">
-                  <div className="token-number">{token.tokenNumber}</div>
-                  {token.priority === 'emergency' && (
-                    <span className="badge badge-emergency">
-                      <AlertTriangle size={12} /> Emergency
-                    </span>
-                  )}
-                </div>
-                <div className="token-service">
-                  {token.serviceId?.name || 'Unknown Service'}
-                </div>
-                <div className="token-meta mb-4">
-                  {getStatusBadge(token.status)}
-                  {token.status === 'waiting' && token.position && (
-                    <span className="text-sm text-muted">
-                      Position: <strong style={{ color: 'var(--primary-light)' }}>#{token.position}</strong>
-                    </span>
-                  )}
-                </div>
-
-                {/* Queue Position Bar */}
-                {token.status === 'waiting' && token.position && (
-                  <div className="queue-position-bar" style={{ marginBottom: 12 }}>
-                    <div className="queue-position-number">#{token.position}</div>
-                    <div className="queue-position-info">
-                      <div className="queue-position-label">
-                        {token.position <= 2
-                          ? '🔥 Almost your turn!'
-                          : `${token.position - 1} ahead of you`}
-                      </div>
-                      <div className="queue-progress">
-                        <div
-                          className="queue-progress-fill"
-                          style={{
-                            width: `${Math.max(10, 100 - (token.position - 1) * 15)}%`,
-                          }}
-                        ></div>
-                      </div>
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <div className="text-3xl font-black text-slate-100">{token.tokenNumber}</div>
+                    <div className="text-sm text-slate-400 font-medium">
+                      {token.serviceId?.name || 'Unknown Service'}
                     </div>
                   </div>
-                )}
-
-                {token.status === 'serving' && (
-                  <div
-                    className="flex items-center gap-2 animate-pulse"
-                    style={{
-                      padding: '10px 16px',
-                      background: 'var(--success-glow)',
-                      borderRadius: 'var(--radius-md)',
-                      color: 'var(--success-light)',
-                      fontSize: '0.85rem',
-                      fontWeight: 600,
-                      marginBottom: 12,
-                    }}
-                  >
-                    <CheckCircle2 size={16} />
-                    It's your turn! Please proceed.
+                  <div className="flex flex-col items-end gap-2">
+                    {getStatusBadge(token.status)}
+                    {token.priority === 'emergency' && (
+                      <span className="badge badge-emergency">
+                        <AlertTriangle size={12} /> Emergency
+                      </span>
+                    )}
                   </div>
-                )}
+                </div>
+
+                <div className="flex flex-wrap gap-4 mt-4 mb-5 p-3 rounded-lg bg-slate-900/50">
+                  {token.status === 'waiting' && token.position && (
+                    <div className="flex items-center gap-2">
+                      <Users size={16} className="text-primary" />
+                      <span className="text-sm text-slate-300">
+                        Position: <strong className="text-primary-light">#{token.position}</strong>
+                      </span>
+                    </div>
+                  )}
+                  {token.status === 'waiting' && token.serviceId?.estimatedMinutes && (
+                    <div className="flex items-center gap-2">
+                      <Clock size={16} className="text-warning" />
+                      <span className="text-sm text-slate-300">
+                        Est. Wait: <strong className="text-warning-light">~{token.serviceId.estimatedMinutes}m</strong>
+                      </span>
+                    </div>
+                  )}
+                  {token.status === 'serving' && (
+                    <div className="text-green-400 font-bold flex items-center gap-2">
+                      <CheckCircle2 size={16} /> Please proceed to counter
+                    </div>
+                  )}
+                </div>
 
                 <div className="flex gap-2">
                   {token.status === 'waiting' && (

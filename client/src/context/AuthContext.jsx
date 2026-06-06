@@ -20,6 +20,7 @@ export const AuthProvider = ({ children }) => {
           // Token invalid/expired
           localStorage.removeItem('sq_token');
           localStorage.removeItem('sq_user');
+          localStorage.removeItem('sq_refresh_token');
           setToken(null);
           setUser(null);
         }
@@ -32,10 +33,11 @@ export const AuthProvider = ({ children }) => {
   const register = useCallback(async (name, email, password) => {
     try {
       const res = await api.post('/auth/register', { name, email, password });
-      const { user: userData, token: jwtToken } = res.data.data;
+      const { user: userData, token: jwtToken, refreshToken } = res.data.data;
 
       localStorage.setItem('sq_token', jwtToken);
       localStorage.setItem('sq_user', JSON.stringify(userData));
+      localStorage.setItem('sq_refresh_token', refreshToken);
       setToken(jwtToken);
       setUser(userData);
 
@@ -50,10 +52,11 @@ export const AuthProvider = ({ children }) => {
   const login = useCallback(async (email, password) => {
     try {
       const res = await api.post('/auth/login', { email, password });
-      const { user: userData, token: jwtToken } = res.data.data;
+      const { user: userData, token: jwtToken, refreshToken } = res.data.data;
 
       localStorage.setItem('sq_token', jwtToken);
       localStorage.setItem('sq_user', JSON.stringify(userData));
+      localStorage.setItem('sq_refresh_token', refreshToken);
       setToken(jwtToken);
       setUser(userData);
 
@@ -65,9 +68,16 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      const refreshToken = localStorage.getItem('sq_refresh_token');
+      await api.post('/auth/logout', { refreshToken });
+    } catch {
+      // Logout API call failed — still clear local state
+    }
     localStorage.removeItem('sq_token');
     localStorage.removeItem('sq_user');
+    localStorage.removeItem('sq_refresh_token');
     setToken(null);
     setUser(null);
     toast.success('Logged out successfully.');

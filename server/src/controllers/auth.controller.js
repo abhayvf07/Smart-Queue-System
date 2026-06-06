@@ -3,10 +3,17 @@ const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const logger = require('../utils/logger');
 
-// Generate JWT
+// Generate Access JWT
 const generateJWT = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRE || '7d',
+  return jwt.sign({ id }, process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_ACCESS_EXPIRE || '1h',
+  });
+};
+
+// Generate Refresh JWT
+const generateRefreshToken = (id) => {
+  return jwt.sign({ id, type: 'refresh' }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d',
   });
 };
 
@@ -53,8 +60,14 @@ const register = async (req, res, next) => {
       role: 'user',
     });
 
-    // Generate token
+    // Generate tokens
     const token = generateJWT(user._id);
+    const refreshToken = generateRefreshToken(user._id);
+
+    user.refreshTokens.push(refreshToken);
+    // Cap refresh tokens at 5 to prevent unbounded array growth
+    if (user.refreshTokens.length > 5) user.refreshTokens = user.refreshTokens.slice(-5);
+    await user.save();
 
     logger.info(`User registered: ${user.email} (${user.role})`);
 
@@ -69,6 +82,7 @@ const register = async (req, res, next) => {
           role: user.role,
         },
         token,
+        refreshToken,
       },
     });
   } catch (error) {
@@ -107,8 +121,14 @@ const login = async (req, res, next) => {
       throw new ApiError(401, 'Invalid email or password.');
     }
 
-    // Generate token
+    // Generate tokens
     const token = generateJWT(user._id);
+    const refreshToken = generateRefreshToken(user._id);
+
+    user.refreshTokens.push(refreshToken);
+    // Cap refresh tokens at 5 to prevent unbounded array growth
+    if (user.refreshTokens.length > 5) user.refreshTokens = user.refreshTokens.slice(-5);
+    await user.save();
 
     logger.info(`User logged in: ${user.email}`);
 
@@ -123,6 +143,7 @@ const login = async (req, res, next) => {
           role: user.role,
         },
         token,
+        refreshToken,
       },
     });
   } catch (error) {
@@ -147,4 +168,82 @@ const getMe = async (req, res, next) => {
   }
 };
 
-module.exports = { register, login, getMe };
+/**
+ * POST /api/auth/refresh
+ * Refresh access token using refresh token
+ */
+const refreshToken = async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      throw new ApiError(400, 'Refresh token is required.');
+    }
+
+    // Verify token
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
+
+    if (decoded.type !== 'refresh') {
+      throw new ApiError(401, 'Invalid token type.');
+    }
+
+    // Check if user still exists
+    const user = await User.findById(decoded.id).select('-password');
+    if (!user) {
+      throw new ApiError(401, 'User no longer exists.');
+    }
+
+    // Validate refresh token is in the database
+    if (!user.refreshTokens.includes(refreshToken)) {
+      throw new ApiError(401, 'Refresh token has been invalidated.');
+    }
+
+    // Remove old refresh token
+    user.refreshTokens = user.refreshTokens.filter(t => t !== refreshToken);
+
+    // Generate new tokens
+    const newAccessToken = generateJWT(user._id);
+    const newRefreshToken = generateRefreshToken(user._id);
+
+    user.refreshTokens.push(newRefreshToken);
+    // Cap refresh tokens at 5 to prevent unbounded array growth
+    if (user.refreshTokens.length > 5) user.refreshTokens = user.refreshTokens.slice(-5);
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        token: newAccessToken,
+        refreshToken: newRefreshToken,
+        user,
+      },
+    });
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      next(new ApiError(401, 'Refresh token expired. Please login again.'));
+    } else if (error.name === 'JsonWebTokenError') {
+      next(new ApiError(401, 'Invalid refresh token.'));
+    } else {
+      next(error);
+    }
+  }
+};
+
+/**
+ * POST /api/auth/logout
+ * Logout user
+ */
+const logout = async (req, res, next) => {
+  try {
+    if (req.user) {
+      // Clear all refresh tokens
+      req.user.refreshTokens = [];
+      await req.user.save();
+    }
+    res.status(200).json({ success: true, message: 'Logged out successfully.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { register, login, getMe, refreshToken, logout };

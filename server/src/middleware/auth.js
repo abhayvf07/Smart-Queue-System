@@ -15,7 +15,7 @@ const protect = async (req, res, next) => {
       throw new ApiError(401, 'Not authorized. Please log in.');
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET);
     const user = await User.findById(decoded.id);
 
     if (!user) {

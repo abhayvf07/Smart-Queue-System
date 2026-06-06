@@ -8,6 +8,8 @@ const api = axios.create({
   },
 });
 
+
+
 // Request interceptor — attach JWT
 api.interceptors.request.use(
   (config) => {
@@ -20,19 +22,64 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor — handle errors globally
+// Response interceptor — handle errors globally with auto-refresh
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config;
     const message =
       error.response?.data?.message || error.message || 'Something went wrong.';
 
-    // Auto-logout on 401
+    // Auto-logout on 401 — but skip for auth endpoints and already-retried requests
     if (error.response?.status === 401) {
-      localStorage.removeItem('sq_token');
-      localStorage.removeItem('sq_user');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+      const isAuthEndpoint = originalRequest.url?.includes('/auth/login') ||
+        originalRequest.url?.includes('/auth/register') ||
+        originalRequest.url?.includes('/auth/refresh');
+
+      // Don't attempt refresh for auth endpoints or already-retried requests
+      if (isAuthEndpoint || originalRequest._retry) {
+        // For non-auth endpoints that failed retry, redirect to login
+        if (!isAuthEndpoint && window.location.pathname !== '/login') {
+          localStorage.removeItem('sq_token');
+          localStorage.removeItem('sq_user');
+          localStorage.removeItem('sq_refresh_token');
+          window.location.href = '/login';
+        }
+        return Promise.reject(error);
+      }
+
+      // Attempt token refresh
+      const refreshToken = localStorage.getItem('sq_refresh_token');
+      if (refreshToken) {
+        originalRequest._retry = true;
+
+        try {
+          const res = await axios.post('/api/auth/refresh', { refreshToken });
+          const { token: newToken, refreshToken: newRefreshToken } = res.data.data;
+
+          localStorage.setItem('sq_token', newToken);
+          if (newRefreshToken) {
+            localStorage.setItem('sq_refresh_token', newRefreshToken);
+          }
+
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
+        } catch (refreshError) {
+          localStorage.removeItem('sq_token');
+          localStorage.removeItem('sq_user');
+          localStorage.removeItem('sq_refresh_token');
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+          return Promise.reject(refreshError);
+        }
+      } else {
+        // No refresh token available — redirect to login
+        localStorage.removeItem('sq_token');
+        localStorage.removeItem('sq_user');
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
       }
     }
 

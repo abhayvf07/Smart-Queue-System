@@ -48,6 +48,15 @@ const broadcastLiveDisplay = (serviceId, displayData) => {
   io.to(`display:${serviceId}`).emit('display:update', displayData);
 };
 
+/**
+ * Broadcast overload alert to a service's room
+ */
+const broadcastOverloadAlert = (serviceId, alertData) => {
+  if (!io) return;
+  io.to(`service:${serviceId}`).emit('overload:alert', alertData);
+  logger.warn(`Queue overload alert broadcasted for service ${serviceId}: ${alertData.waiting} waiting`);
+};
+
 module.exports = {
   initNotificationService,
   broadcastQueueUpdate,
@@ -55,4 +64,5 @@ module.exports = {
   notifyTokenCalled,
   notifyTokenApproaching,
   broadcastLiveDisplay,
+  broadcastOverloadAlert,
 };

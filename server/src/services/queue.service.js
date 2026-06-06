@@ -1,21 +1,18 @@
 const Token = require('../models/Token');
 const Service = require('../models/Service');
 const mongoose = require('mongoose');
+const { EventEmitter } = require('events');
 const { generateTokenNumber } = require('../utils/tokenGenerator');
-const { cacheGet, cacheSet, cacheDel } = require('../config/redis');
 const ApiError = require('../utils/ApiError');
 const logger = require('../utils/logger');
 
+// Event emitter to decouple from notification service (avoids circular require)
+const queueEvents = new EventEmitter();
+
 /**
- * Get queue for a service — with Redis caching (TTL 10s)
+ * Get queue for a service
  */
 const getQueueForService = async (serviceId) => {
-  const cacheKey = `queue:${serviceId}`;
-
-  // Try cache first
-  const cached = await cacheGet(cacheKey);
-  if (cached) return cached;
-
   // Fetch serving and waiting separately — avoids fragile alphabetical sort on status
   const [servingTokens, waitingTokens] = await Promise.all([
     Token.find({ serviceId, status: 'serving' })
@@ -38,26 +35,19 @@ const getQueueForService = async (serviceId) => {
 
   const queue = [...servingTokens, ...waitingTokens];
 
-  // Cache for 10 seconds
-  await cacheSet(cacheKey, queue, 10);
-
   return queue;
 };
 
 /**
- * Get queue stats for a service — with Redis caching (TTL 5s)
+ * Get queue stats for a service
  */
 const getQueueStats = async (serviceId) => {
-  const cacheKey = `stats:${serviceId}`;
-
-  const cached = await cacheGet(cacheKey);
-  if (cached) return cached;
-
+  const sId = serviceId._id || serviceId;
   const [waitingCount, servingToken, completedToday] = await Promise.all([
-    Token.countDocuments({ serviceId, status: 'waiting' }),
-    Token.findOne({ serviceId, status: 'serving' }).populate('userId', 'name').lean(),
+    Token.countDocuments({ serviceId: sId, status: 'waiting' }),
+    Token.findOne({ serviceId: sId, status: 'serving' }).populate('userId', 'name').lean(),
     Token.countDocuments({
-      serviceId,
+      serviceId: sId,
       status: 'completed',
       completedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
     }),
@@ -67,7 +57,7 @@ const getQueueStats = async (serviceId) => {
   const avgWaitResult = await Token.aggregate([
     {
       $match: {
-        serviceId: mongoose.Types.ObjectId.createFromHexString(serviceId.toString()),
+        serviceId: new mongoose.Types.ObjectId(sId),
         status: 'completed',
         calledAt: { $ne: null },
         completedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
@@ -90,7 +80,6 @@ const getQueueStats = async (serviceId) => {
       : 0,
   };
 
-  await cacheSet(cacheKey, stats, 5);
   return stats;
 };
 
@@ -130,21 +119,23 @@ const getTokenPosition = async (token) => {
 /**
  * Book a new token — with duplicate prevention and atomic counter
  */
-const bookToken = async (userId, serviceId, priority = 'normal') => {
+const bookToken = async (userId, serviceId, priority = 'normal', bypassDuplicateCheck = false) => {
   // Check service exists and is active
   const service = await Service.findById(serviceId);
   if (!service || !service.active) {
     throw new ApiError(400, 'Service not available.');
   }
 
-  // Prevent duplicate booking
-  const existingToken = await Token.findOne({
-    userId,
-    serviceId,
-    status: { $in: ['waiting', 'serving'] },
-  });
-  if (existingToken) {
-    throw new ApiError(400, 'You already have an active token for this service.');
+  // Prevent duplicate booking unless bypassed (e.g. by admin for walk-ins)
+  if (!bypassDuplicateCheck) {
+    const existingToken = await Token.findOne({
+      userId,
+      serviceId,
+      status: { $in: ['waiting', 'serving'] },
+    });
+    if (existingToken) {
+      throw new ApiError(400, 'You already have an active token for this service.');
+    }
   }
 
   // Generate atomic token number
@@ -161,10 +152,6 @@ const bookToken = async (userId, serviceId, priority = 'normal') => {
     expiresAt,
   });
 
-  // Invalidate cache
-  await cacheDel(`queue:${serviceId}`);
-  await cacheDel(`stats:${serviceId}`);
-
   logger.info(`Token booked: ${tokenNumber} by user ${userId} for service ${service.name}`);
 
   return token;
@@ -174,7 +161,7 @@ const bookToken = async (userId, serviceId, priority = 'normal') => {
  * Call next token — finds the next waiting token (emergency first)
  */
 const callNextToken = async (serviceId) => {
-  // Complete current serving token first
+  // Complete ALL currently serving tokens to prevent stuck tokens
   await Token.updateMany(
     { serviceId, status: 'serving' },
     { status: 'completed', completedAt: new Date() }
@@ -187,7 +174,7 @@ const callNextToken = async (serviceId) => {
     { new: true, sort: { createdAt: 1 } }
   )
     .populate('userId', 'name email')
-    .populate('serviceId', 'name prefix');
+    .populate('serviceId', 'name prefix capacityPerHour');
 
   // If no emergency token, find normal
   if (!nextToken) {
@@ -197,16 +184,12 @@ const callNextToken = async (serviceId) => {
       { new: true, sort: { createdAt: 1 } }
     )
       .populate('userId', 'name email')
-      .populate('serviceId', 'name prefix');
+      .populate('serviceId', 'name prefix capacityPerHour');
   }
 
   if (!nextToken) {
     throw new ApiError(404, 'No waiting tokens in queue.');
   }
-
-  // Invalidate cache
-  await cacheDel(`queue:${serviceId}`);
-  await cacheDel(`stats:${serviceId}`);
 
   logger.info(`Token called: ${nextToken.tokenNumber} for service ${serviceId}`);
 
@@ -225,9 +208,6 @@ const skipToken = async (tokenId) => {
 
   if (!token) throw new ApiError(404, 'Token not found.');
 
-  await cacheDel(`queue:${token.serviceId}`);
-  await cacheDel(`stats:${token.serviceId}`);
-
   logger.info(`Token skipped: ${token.tokenNumber}`);
   return token;
 };
@@ -236,21 +216,23 @@ const skipToken = async (tokenId) => {
  * Cancel a token (by user)
  */
 const cancelToken = async (tokenId, userId) => {
-  const token = await Token.findOne({
-    _id: tokenId,
-    userId,
-    status: { $in: ['waiting'] },
-  });
+  // First check if token exists at all for this user
+  const token = await Token.findOne({ _id: tokenId, userId });
 
   if (!token) {
-    throw new ApiError(404, 'Token not found or cannot be cancelled.');
+    throw new ApiError(404, 'Token not found.');
+  }
+
+  if (token.status === 'serving') {
+    throw new ApiError(400, 'Token is currently being served and cannot be cancelled.');
+  }
+
+  if (token.status !== 'waiting') {
+    throw new ApiError(400, `Token has status "${token.status}" and cannot be cancelled.`);
   }
 
   token.status = 'cancelled';
   await token.save();
-
-  await cacheDel(`queue:${token.serviceId}`);
-  await cacheDel(`stats:${token.serviceId}`);
 
   logger.info(`Token cancelled: ${token.tokenNumber} by user ${userId}`);
   return token;
@@ -266,8 +248,15 @@ const getAnalytics = async (serviceId) => {
     completedAt: { $gte: today },
   };
   if (serviceId) {
-    matchStage.serviceId = mongoose.Types.ObjectId.createFromHexString(serviceId.toString());
+    const sId = serviceId._id ? serviceId._id.toString() : serviceId.toString();
+    const isValidId = /^[0-9a-fA-F]{24}$/.test(sId);
+    
+    if (!isValidId) {
+      return { totalCompleted: 0, avgWaitMinutes: 0, peakHours: [] };
+    }
+    matchStage.serviceId = new mongoose.Types.ObjectId(sId);
   }
+
 
   const [metrics, peakHours] = await Promise.all([
     Token.aggregate([
@@ -293,7 +282,8 @@ const getAnalytics = async (serviceId) => {
     ]),
   ]);
 
-  return {
+  // Final analytics object
+  const analyticsData = {
     totalCompleted: metrics[0]?.totalCompleted || 0,
     avgWaitMinutes: metrics[0] ? Math.round(metrics[0].avgWaitMs / 60000) : 0,
     peakHours: peakHours.map((h) => ({
@@ -301,6 +291,8 @@ const getAnalytics = async (serviceId) => {
       count: h.count,
     })),
   };
+
+  return analyticsData;
 };
 
 /**
@@ -324,28 +316,99 @@ const cancelExpiredTokens = async () => {
       { status: 'waiting', expiresAt: { $lt: now } },
       { status: 'cancelled' }
     );
+    
+    // Emit event for notification broadcasting (handled in index.js)
+    const uniqueServiceIds = [...new Set(expiredTokens.map((t) => t.serviceId.toString()))];
+    queueEvents.emit('tokensExpired', uniqueServiceIds);
 
-    // Invalidate Redis cache for each affected service
-    const affectedServices = [...new Set(expiredTokens.map((t) => t.serviceId.toString()))];
-    for (const sid of affectedServices) {
-      await cacheDel(`queue:${sid}`);
-      await cacheDel(`stats:${sid}`);
-    }
-
-    logger.info(`Auto-cancelled ${expiredTokens.length} expired token(s) across ${affectedServices.length} service(s)`);
+    logger.info(`Auto-cancelled ${expiredTokens.length} expired token(s) across ${uniqueServiceIds.length} service(s)`);
   } catch (error) {
     logger.error(`Failed to cancel expired tokens: ${error.message}`);
   }
 };
 
+/**
+ * Get estimated wait time for a token, with capacityPerHour cold-start fallback.
+ */
+const getEstimatedWaitTime = async (token, service = null, preFetchedStats = null) => {
+  if (token.status !== 'waiting') {
+    return { estimatedMinutes: 0, estimatedCalledAt: null };
+  }
+
+  const position = await getTokenPosition(token);
+  const stats = preFetchedStats || await module.exports.getQueueStats(token.serviceId);
+  const targetService = service || await Service.findById(token.serviceId);
+  
+  // Cold-start fallback: if stats.avgWaitMinutes is 0, use capacityPerHour to estimate, default to 5
+  const fallbackAvgWait = stats.avgWaitMinutes || (targetService?.capacityPerHour ? Math.round(60 / targetService.capacityPerHour) : 5);
+  const estimatedMinutes = (position - 1) * fallbackAvgWait; // position 1 is next, so wait time is (position - 1) * avgWait
+  const estimatedCalledAt = new Date(Date.now() + estimatedMinutes * 60000);
+
+  return { estimatedMinutes, estimatedCalledAt };
+};
+
+/**
+ * Bulk compute positions for multiple tokens (avoids N+1 queries).
+ * Returns a Map of tokenId -> position.
+ */
+const getTokenPositions = async (tokens) => {
+  const waitingTokens = tokens.filter(t => t.status === 'waiting');
+  if (waitingTokens.length === 0) {
+    return new Map(tokens.map(t => [t._id.toString(), 0]));
+  }
+
+  // Group tokens by serviceId
+  const byService = {};
+  for (const t of waitingTokens) {
+    const sid = (t.serviceId._id || t.serviceId).toString();
+    if (!byService[sid]) byService[sid] = [];
+    byService[sid].push(t);
+  }
+
+  const positions = new Map(tokens.map(t => [t._id.toString(), 0]));
+
+  // For each service, compute positions in bulk with a single aggregation
+  for (const [sid, serviceTokens] of Object.entries(byService)) {
+    // Get all waiting tokens for this service, sorted by priority and createdAt
+    const allWaiting = await Token.find({
+      serviceId: sid,
+      status: 'waiting',
+    }).sort({ createdAt: 1 }).select('_id priority createdAt').lean();
+
+    // Sort: emergency first, then normal (stable sort preserves createdAt within each priority)
+    allWaiting.sort((a, b) => {
+      if (a.priority === 'emergency' && b.priority !== 'emergency') return -1;
+      if (a.priority !== 'emergency' && b.priority === 'emergency') return 1;
+      return 0;
+    });
+
+    // Build position map from sorted order
+    const posMap = new Map();
+    allWaiting.forEach((t, idx) => {
+      posMap.set(t._id.toString(), idx + 1); // 1-based
+    });
+
+    // Assign positions to requested tokens
+    for (const t of serviceTokens) {
+      const tid = t._id.toString();
+      positions.set(tid, posMap.get(tid) || 0);
+    }
+  }
+
+  return positions;
+};
+
 module.exports = {
+  queueEvents,
   getQueueForService,
   getQueueStats,
   getTokenPosition,
+  getTokenPositions,
   bookToken,
   callNextToken,
   skipToken,
   cancelToken,
   getAnalytics,
   cancelExpiredTokens,
+  getEstimatedWaitTime,
 };

@@ -13,7 +13,10 @@ const QueueTracker = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const isValidId = /^[0-9a-fA-F]{24}$/.test(serviceId);
+
   const fetchQueue = async () => {
+    if (!isValidId) return;
     try {
       const res = await api.get(`/tokens/queue-status/${serviceId}`);
       setQueue(res.data.data.queue);
@@ -26,10 +29,14 @@ const QueueTracker = () => {
   };
 
   useEffect(() => {
+    if (!isValidId) {
+      setLoading(false);
+      return;
+    }
     fetchQueue();
     joinService(serviceId);
     return () => leaveService(serviceId);
-  }, [serviceId]);
+  }, [serviceId, isValidId]);
 
   // Real-time updates
   useEffect(() => {
@@ -67,6 +74,12 @@ const QueueTracker = () => {
       {loading ? (
         <div className="flex justify-center" style={{ padding: 60 }}>
           <div className="spinner"></div>
+        </div>
+      ) : !isValidId ? (
+        <div className="empty-state">
+          <AlertTriangle size={48} />
+          <h3>Service Not Found</h3>
+          <p>The queue you are looking for does not exist.</p>
         </div>
       ) : (
         <>

@@ -8,7 +8,7 @@ import {
   Zap,
 } from 'lucide-react';
 
-const Sidebar = () => {
+const Sidebar = ({ isOpen, onClose }) => {
   const location = useLocation();
 
   const adminLinks = [
@@ -23,8 +23,9 @@ const Sidebar = () => {
   ];
 
   return (
-    <aside className="sidebar" id="admin-sidebar">
-      <div className="sidebar-header">
+    <>
+      <aside className={`sidebar ${isOpen ? 'open' : ''}`} id="admin-sidebar">
+        <div className="sidebar-header">
         <div className="sidebar-logo">⚡</div>
         <div>
           <div className="sidebar-title">SmartQueue</div>
@@ -75,6 +76,13 @@ const Sidebar = () => {
         </div>
       </div>
     </aside>
+    {isOpen && (
+      <div 
+        className="sidebar-overlay fixed inset-0 bg-black/50 z-40"
+        onClick={onClose}
+      />
+    )}
+    </>
   );
 };
 

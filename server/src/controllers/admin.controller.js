@@ -2,6 +2,9 @@ const mongoose = require('mongoose');
 const Token = require('../models/Token');
 const queueService = require('../services/queue.service');
 const notificationService = require('../services/notification.service');
+const anomalyService = require('../services/anomaly.service');
+const forecastService = require('../services/forecast.service');
+const { getSentimentStats, getSentimentTrend } = require('../services/sentiment.service');
 const ApiError = require('../utils/ApiError');
 
 /**
@@ -84,6 +87,19 @@ const callNext = async (req, res, next) => {
     const queue = await queueService.getQueueForService(serviceId);
     const stats = await queueService.getQueueStats(serviceId);
 
+    // AI-powered anomaly detection for overload alerts (replaces hardcoded threshold)
+    const anomaly = await anomalyService.detectAnomaly(serviceId);
+    if (anomaly.isAnomaly) {
+      const serviceObj = calledToken.serviceId;
+      notificationService.broadcastOverloadAlert(serviceId, {
+        serviceId,
+        waiting: stats.waiting,
+        threshold: anomaly.threshold,
+        zScore: anomaly.zScore,
+        message: `⚠️ Service "${serviceObj?.name || 'Service'}" is experiencing unusual congestion! (${stats.waiting} waiting, Z-score: ${anomaly.zScore})`,
+      });
+    }
+
     // Notify users who are approaching (position ≤ 2)
     const waitingTokens = queue.filter((t) => t.status === 'waiting');
     for (let i = 0; i < Math.min(2, waitingTokens.length); i++) {
@@ -125,7 +141,7 @@ const updateTokenStatus = async (req, res, next) => {
       throw new ApiError(400, 'Invalid Token ID format.');
     }
 
-    if (!['waiting', 'serving', 'completed', 'skipped'].includes(status)) {
+    if (!['waiting', 'serving', 'completed', 'skipped', 'cancelled'].includes(status)) {
       throw new ApiError(400, 'Invalid status.');
     }
 
@@ -180,12 +196,27 @@ const createEmergencyToken = async (req, res, next) => {
 
     // Use the requesting admin's ID if no userId provided
     const targetUserId = userId || req.user._id;
+    const bypassCheck = targetUserId.toString() === req.user._id.toString();
 
-    const token = await queueService.bookToken(targetUserId, serviceId, 'emergency');
+    const token = await queueService.bookToken(targetUserId, serviceId, 'emergency', bypassCheck);
 
     // Broadcast
     const queue = await queueService.getQueueForService(serviceId);
     const stats = await queueService.getQueueStats(serviceId);
+
+    // AI-powered anomaly detection for overload alerts
+    const anomaly = await anomalyService.detectAnomaly(serviceId);
+    if (anomaly.isAnomaly) {
+      const targetService = await mongoose.model('Service').findById(serviceId).lean();
+      notificationService.broadcastOverloadAlert(serviceId, {
+        serviceId,
+        waiting: stats.waiting,
+        threshold: anomaly.threshold,
+        zScore: anomaly.zScore,
+        message: `⚠️ Service "${targetService?.name || 'Service'}" is experiencing unusual congestion! (${stats.waiting} waiting, Z-score: ${anomaly.zScore})`,
+      });
+    }
+
     notificationService.broadcastQueueUpdate(serviceId, queue);
     notificationService.broadcastQueueStats(serviceId, stats);
 
@@ -278,10 +309,69 @@ const getAnalytics = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /api/admin/forecast
+ * Get AI-powered peak-hours forecast for tomorrow
+ */
+const getForecastData = async (req, res, next) => {
+  try {
+    const { serviceId } = req.query;
+    const forecast = await forecastService.getForecast(serviceId || null);
+
+    res.status(200).json({
+      success: true,
+      data: forecast,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/admin/sentiment
+ * Get chatbot sentiment analytics
+ */
+const getSentimentAnalytics = async (req, res, next) => {
+  try {
+    const days = parseInt(req.query.days) || 7;
+    const [stats, trend] = await Promise.all([
+      getSentimentStats(days),
+      getSentimentTrend(days),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: { stats, trend },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/admin/anomaly-status
+ * Get AI anomaly detection status for all services
+ */
+const getAnomalyStatus = async (req, res, next) => {
+  try {
+    const results = await anomalyService.getAnomalyStatusAll();
+
+    res.status(200).json({
+      success: true,
+      data: { services: results },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getAllTokens,
   callNext,
   updateTokenStatus,
   createEmergencyToken,
   getAnalytics,
+  getForecastData,
+  getSentimentAnalytics,
+  getAnomalyStatus,
 };

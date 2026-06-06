@@ -9,16 +9,13 @@ const Navbar = ({ onMenuToggle, isSidebarOpen }) => {
   return (
     <nav className={`navbar ${!isAdmin ? 'full-width' : ''}`} id="main-navbar">
       <div className="flex items-center gap-3">
-        {isAdmin && (
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={onMenuToggle}
-            id="menu-toggle-btn"
-            style={{ display: 'none' }}
-          >
-            <Menu size={18} />
-          </button>
-        )}
+        <button
+          className="btn btn-ghost btn-sm md:hidden"
+          onClick={onMenuToggle}
+          id="menu-toggle-btn"
+        >
+          <Menu size={18} />
+        </button>
         {!isAdmin && (
           <div className="navbar-brand">
             <div className="logo-icon">⚡</div>

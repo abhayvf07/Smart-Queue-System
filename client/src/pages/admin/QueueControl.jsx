@@ -277,7 +277,7 @@ const QueueControl = () => {
           </div>
         ) : (
           <div className="table-container">
-            <table className="table">
+            <table className="table" style={{ minWidth: 800 }}>
               <thead>
                 <tr>
                   <th>#</th>

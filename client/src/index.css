@@ -632,7 +632,7 @@ a:hover {
 .form-input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--primary-glow);
-  background: rgba(30, 41, 59, 0.8);
+  background: #ffffff;
 }
 
 .form-input.error {
@@ -1381,3 +1381,42 @@ a:hover {
 .w-full { width: 100%; }
 .relative { position: relative; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ========================================
+   RESPONSIVENESS (Mobile)
+   ======================================== */
+@media (max-width: 768px) {
+  .main-content {
+    margin-left: 0;
+    padding: 16px;
+    padding-top: calc(var(--navbar-height) + 16px);
+  }
+  .navbar {
+    left: 0;
+    padding: 0 16px;
+  }
+  .sidebar {
+    transform: translateX(-100%);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .sidebar-overlay {
+    display: block;
+  }
+}
+
+@media (min-width: 769px) {
+  .md\:hidden {
+    display: none !important;
+  }
+}
+
+/* Service Card Selected State */
+.service-card.selected {
+  border: 2px solid var(--primary);
+  box-shadow: 0 10px 25px -5px var(--primary-glow), 0 8px 10px -6px var(--primary-glow);
+}

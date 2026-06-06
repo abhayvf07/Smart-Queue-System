@@ -1,7 +1,9 @@
-const Token = require('../models/Token');
-const queueService = require('../services/queue.service');
-const notificationService = require('../services/notification.service');
-const ApiError = require('../utils/ApiError');
+const mongoose = require("mongoose");
+const Token = require("../models/Token");
+const queueService = require("../services/queue.service");
+const notificationService = require("../services/notification.service");
+const anomalyService = require("../services/anomaly.service");
+const ApiError = require("../utils/ApiError");
 
 /**
  * POST /api/tokens/book
@@ -9,13 +11,16 @@ const ApiError = require('../utils/ApiError');
  */
 const bookToken = async (req, res, next) => {
   try {
-    const { serviceId } = req.body;
+    const { serviceId, priority } = req.body;
 
     if (!serviceId) {
-      throw new ApiError(400, 'Please select a service.');
+      throw new ApiError(400, "Please select a service.");
     }
 
-    const token = await queueService.bookToken(req.user._id, serviceId);
+    // Prevent priority spoofing: only admins can set emergency
+    const actualPriority = req.user.role === 'admin' && priority === 'emergency' ? 'emergency' : 'normal';
+
+    const token = await queueService.bookToken(req.user._id, serviceId, actualPriority);
 
     // Get updated queue and broadcast
     const queue = await queueService.getQueueForService(serviceId);
@@ -24,17 +29,32 @@ const bookToken = async (req, res, next) => {
     notificationService.broadcastQueueStats(serviceId, stats);
     notificationService.broadcastLiveDisplay(serviceId, { queue, stats });
 
-    // Get position for the new token
+    // Get position and wait time for the new token
     const fullToken = await Token.findById(token._id)
-      .populate('serviceId', 'name prefix')
+      .populate("serviceId", "name prefix capacityPerHour")
       .lean();
+
+    // AI-powered anomaly detection for overload alerts (replaces hardcoded threshold)
+    const anomaly = await anomalyService.detectAnomaly(serviceId);
+    if (anomaly.isAnomaly) {
+      const serviceObj = fullToken.serviceId;
+      notificationService.broadcastOverloadAlert(serviceId, {
+        serviceId,
+        waiting: stats.waiting,
+        threshold: anomaly.threshold,
+        zScore: anomaly.zScore,
+        message: `⚠️ Service "${serviceObj?.name || 'Service'}" is experiencing unusual congestion! (${stats.waiting} waiting, Z-score: ${anomaly.zScore})`,
+      });
+    }
+
     const position = await queueService.getTokenPosition(token);
+    const { estimatedMinutes, estimatedCalledAt } = await queueService.getEstimatedWaitTime(token, fullToken.serviceId);
 
     res.status(201).json({
       success: true,
       message: `Token ${token.tokenNumber} booked successfully!`,
       data: {
-        token: { ...fullToken, position },
+        token: { ...fullToken, position, estimatedMinutes, estimatedCalledAt },
       },
     });
   } catch (error) {
@@ -50,18 +70,31 @@ const getMyTokens = async (req, res, next) => {
   try {
     const tokens = await Token.find({
       userId: req.user._id,
-      status: { $in: ['waiting', 'serving'] },
+      status: { $in: ["waiting", "serving"] },
     })
-      .populate('serviceId', 'name prefix')
+      .populate("serviceId", "name prefix capacityPerHour")
       .sort({ createdAt: -1 })
       .lean();
 
-    // Compute positions dynamically
+    // Optimize N+1: Pre-fetch stats for unique services
+    const uniqueServiceIds = [...new Set(tokens.map(t => t.serviceId._id.toString()))];
+    const statsMap = {};
+    for (const sid of uniqueServiceIds) {
+      statsMap[sid] = await queueService.getQueueStats(sid);
+    }
+
     const tokensWithPositions = await Promise.all(
-      tokens.map(async (t) => ({
-        ...t,
-        position: await queueService.getTokenPosition(t),
-      }))
+      tokens.map(async (t) => {
+        const position = await queueService.getTokenPosition(t);
+        const preFetchedStats = statsMap[t.serviceId._id.toString()];
+        const { estimatedMinutes, estimatedCalledAt } = await queueService.getEstimatedWaitTime(t, t.serviceId, preFetchedStats);
+        return {
+          ...t,
+          position,
+          estimatedMinutes,
+          estimatedCalledAt,
+        };
+      })
     );
 
     res.status(200).json({
@@ -80,6 +113,10 @@ const getMyTokens = async (req, res, next) => {
 const getQueueStatus = async (req, res, next) => {
   try {
     const { serviceId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(serviceId)) {
+      throw new ApiError(400, "Invalid service ID");
+    }
 
     const [queue, stats] = await Promise.all([
       queueService.getQueueForService(serviceId),
@@ -103,15 +140,20 @@ const cancelToken = async (req, res, next) => {
   try {
     const token = await queueService.cancelToken(req.params.id, req.user._id);
 
-    // Broadcast updates
     const queue = await queueService.getQueueForService(token.serviceId);
     const stats = await queueService.getQueueStats(token.serviceId);
+    
+    // Broadcast updates
     notificationService.broadcastQueueUpdate(token.serviceId, queue);
     notificationService.broadcastQueueStats(token.serviceId, stats);
-
+    notificationService.broadcastLiveDisplay(
+      token.serviceId,
+      { queue, stats }
+    );
+    
     res.status(200).json({
       success: true,
-      message: 'Token cancelled successfully.',
+      message: "Token cancelled successfully.",
       data: { token },
     });
   } catch (error) {
@@ -131,7 +173,7 @@ const getTokenHistory = async (req, res, next) => {
 
     const [tokens, total] = await Promise.all([
       Token.find({ userId: req.user._id })
-        .populate('serviceId', 'name prefix')
+        .populate("serviceId", "name prefix")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)

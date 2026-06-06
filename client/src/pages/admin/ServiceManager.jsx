@@ -9,6 +9,9 @@ import {
   XCircle,
   X,
   AlertCircle,
+  Sparkles,
+  Brain,
+  Loader2,
 } from 'lucide-react';
 
 const ServiceManager = () => {
@@ -20,6 +23,8 @@ const ServiceManager = () => {
   const [formErrors, setFormErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [classifying, setClassifying] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState(null);
 
   const fetchServices = async () => {
     try {
@@ -40,6 +45,7 @@ const ServiceManager = () => {
     setEditService(null);
     setForm({ name: '', description: '', prefix: '', capacityPerHour: 20 });
     setFormErrors({});
+    setAiSuggestion(null);
     setShowModal(true);
   };
 
@@ -52,7 +58,36 @@ const ServiceManager = () => {
       capacityPerHour: service.capacityPerHour,
     });
     setFormErrors({});
+    setAiSuggestion(null);
     setShowModal(true);
+  };
+
+  const handleAISuggest = async () => {
+    if (!form.name.trim()) {
+      setFormErrors({ name: 'Enter a service name first for AI classification.' });
+      return;
+    }
+    setClassifying(true);
+    setAiSuggestion(null);
+    try {
+      const res = await api.post('/services/classify', {
+        name: form.name,
+        description: form.description,
+      });
+      const cls = res.data.data.classification;
+      setAiSuggestion(cls);
+      // Auto-fill form with suggestions (don't overwrite if already set by user)
+      setForm(prev => ({
+        ...prev,
+        prefix: prev.prefix || cls.suggestedPrefix,
+        capacityPerHour: prev.capacityPerHour === 20 ? cls.suggestedCapacity : prev.capacityPerHour,
+        description: prev.description || cls.reasoning,
+      }));
+    } catch (err) {
+      toast.error('AI classification failed. Try again.');
+    } finally {
+      setClassifying(false);
+    }
   };
 
   const validateForm = () => {
@@ -217,6 +252,54 @@ const ServiceManager = () => {
                   placeholder="Short description"
                 />
               </div>
+
+              {/* AI Suggest Button — only show on create, not edit */}
+              {!editService && (
+                <div style={{ marginBottom: 12 }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={handleAISuggest}
+                    disabled={classifying || !form.name.trim()}
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(236, 72, 153, 0.1))',
+                      border: '1px solid rgba(139, 92, 246, 0.3)',
+                      color: '#c084fc',
+                      width: '100%',
+                    }}
+                  >
+                    {classifying ? (
+                      <><Loader2 size={14} className="animate-spin" /> Analyzing with Gemini AI...</>
+                    ) : (
+                      <><Sparkles size={14} /> AI Suggest — Auto-fill prefix & capacity</>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* AI Suggestion Display */}
+              {aiSuggestion && (
+                <div style={{
+                  padding: '12px 16px',
+                  background: 'rgba(139, 92, 246, 0.06)',
+                  borderRadius: 'var(--radius-lg)',
+                  border: '1px solid rgba(139, 92, 246, 0.2)',
+                  marginBottom: 12,
+                  fontSize: '0.8rem',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, fontWeight: 700, color: '#c084fc' }}>
+                    <Brain size={14} /> AI Classification
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    <strong>Category:</strong> <span style={{ textTransform: 'capitalize', color: 'var(--text-primary)' }}>{aiSuggestion.category}</span><br />
+                    <strong>Suggested Prefix:</strong> {aiSuggestion.suggestedPrefix}
+                    {aiSuggestion.prefixOptions && (
+                      <span style={{ color: 'var(--text-muted)' }}> (alternatives: {aiSuggestion.prefixOptions.join(', ')})</span>
+                    )}<br />
+                    <strong>Capacity:</strong> {aiSuggestion.suggestedCapacity}/hr — <em>{aiSuggestion.capacityReasoning}</em>
+                  </div>
+                </div>
+              )}
 
               <div className="grid-2">
                 <div className="form-group">

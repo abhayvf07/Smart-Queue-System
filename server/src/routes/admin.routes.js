@@ -5,6 +5,9 @@ const {
   updateTokenStatus,
   createEmergencyToken,
   getAnalytics,
+  getForecastData,
+  getSentimentAnalytics,
+  getAnomalyStatus,
 } = require('../controllers/admin.controller');
 const { protect, requireRole } = require('../middleware/auth');
 
@@ -18,5 +21,10 @@ router.put('/call-next/:serviceId', callNext);
 router.put('/update-status/:tokenId', updateTokenStatus);
 router.post('/emergency-token', createEmergencyToken);
 router.get('/analytics', getAnalytics);
+
+// AI-powered endpoints
+router.get('/forecast', getForecastData);
+router.get('/sentiment', getSentimentAnalytics);
+router.get('/anomaly-status', getAnomalyStatus);
 
 module.exports = router;

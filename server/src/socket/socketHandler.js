@@ -9,7 +9,7 @@ const setupSocket = (io) => {
     try {
       const token = socket.handshake.auth.token;
       if (token) {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET);
         const user = await User.findById(decoded.id);
         if (user) {
           socket.user = user;

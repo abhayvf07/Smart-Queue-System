@@ -17,6 +17,7 @@ const serviceSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
       maxlength: 3,
+      unique: true,
     },
     capacityPerHour: {
       type: Number,
