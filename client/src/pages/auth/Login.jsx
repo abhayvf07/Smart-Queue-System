@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Mail, Lock, Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react';
 
 const Login = () => {
   const [form, setForm] = useState({ email: '', password: '' });
@@ -173,7 +173,7 @@ const Login = () => {
           </form>
 
           <div className="auth-footer">
-            Don't have an account?{' '}
+            Don&apos;t have an account?{' '}
             <Link to="/register" id="goto-register">
               Create one
             </Link>
