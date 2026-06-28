@@ -29,6 +29,27 @@ import Analytics from './pages/admin/Analytics';
 // Display
 import LiveDisplay from './pages/display/LiveDisplay';
 
+/**
+ * Shared layout for user routes (Navbar only, no sidebar).
+ */
+const UserLayout = ({ children, toggleSidebar, isSidebarOpen }) => (
+  <div className="app-layout">
+    <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
+    <main className="main-content no-sidebar">{children}</main>
+  </div>
+);
+
+/**
+ * Shared layout for admin routes (Sidebar + Navbar).
+ */
+const AdminLayout = ({ children, toggleSidebar, isSidebarOpen, closeSidebar }) => (
+  <div className="app-layout">
+    <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
+    <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
+    <main className="main-content">{children}</main>
+  </div>
+);
+
 const AppLayout = () => {
   const { isAuthenticated, isAdmin, loading } = useAuth();
   const location = useLocation();
@@ -65,88 +86,60 @@ const AppLayout = () => {
         {/* User routes */}
         <Route path="/dashboard" element={
           <ProtectedRoute requiredRole="user">
-            <div className="app-layout">
-              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
-              <main className="main-content no-sidebar">
-                <UserDashboard />
-              </main>
-            </div>
+            <UserLayout toggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen}>
+              <UserDashboard />
+            </UserLayout>
           </ProtectedRoute>
         } />
         <Route path="/book-token" element={
           <ProtectedRoute requiredRole="user">
-            <div className="app-layout">
-              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
-              <main className="main-content no-sidebar">
-                <BookToken />
-              </main>
-            </div>
+            <UserLayout toggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen}>
+              <BookToken />
+            </UserLayout>
           </ProtectedRoute>
         } />
         <Route path="/history" element={
           <ProtectedRoute requiredRole="user">
-            <div className="app-layout">
-              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
-              <main className="main-content no-sidebar">
-                <TokenHistory />
-              </main>
-            </div>
+            <UserLayout toggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen}>
+              <TokenHistory />
+            </UserLayout>
           </ProtectedRoute>
         } />
         <Route path="/queue/:serviceId" element={
           <ProtectedRoute requiredRole="user">
-            <div className="app-layout">
-              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
-              <main className="main-content no-sidebar">
-                <QueueTracker />
-              </main>
-            </div>
+            <UserLayout toggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen}>
+              <QueueTracker />
+            </UserLayout>
           </ProtectedRoute>
         } />
 
         {/* Admin routes */}
         <Route path="/admin" element={
           <ProtectedRoute requiredRole="admin">
-            <div className="app-layout">
-              <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
-              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
-              <main className="main-content">
-                <AdminDashboard />
-              </main>
-            </div>
+            <AdminLayout toggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen} closeSidebar={closeSidebar}>
+              <AdminDashboard />
+            </AdminLayout>
           </ProtectedRoute>
         } />
         <Route path="/admin/queue" element={
           <ProtectedRoute requiredRole="admin">
-            <div className="app-layout">
-              <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
-              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
-              <main className="main-content">
-                <QueueControl />
-              </main>
-            </div>
+            <AdminLayout toggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen} closeSidebar={closeSidebar}>
+              <QueueControl />
+            </AdminLayout>
           </ProtectedRoute>
         } />
         <Route path="/admin/services" element={
           <ProtectedRoute requiredRole="admin">
-            <div className="app-layout">
-              <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
-              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
-              <main className="main-content">
-                <ServiceManager />
-              </main>
-            </div>
+            <AdminLayout toggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen} closeSidebar={closeSidebar}>
+              <ServiceManager />
+            </AdminLayout>
           </ProtectedRoute>
         } />
         <Route path="/admin/analytics" element={
           <ProtectedRoute requiredRole="admin">
-            <div className="app-layout">
-              <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
-              <Navbar onMenuToggle={toggleSidebar} isSidebarOpen={isSidebarOpen} />
-              <main className="main-content">
-                <Analytics />
-              </main>
-            </div>
+            <AdminLayout toggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen} closeSidebar={closeSidebar}>
+              <Analytics />
+            </AdminLayout>
           </ProtectedRoute>
         } />
 
