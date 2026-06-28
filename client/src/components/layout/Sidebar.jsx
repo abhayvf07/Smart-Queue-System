@@ -1,15 +1,13 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   ListOrdered,
   Settings,
   BarChart3,
   Monitor,
-  Zap,
 } from 'lucide-react';
 
 const Sidebar = ({ isOpen, onClose }) => {
-  const location = useLocation();
 
   const adminLinks = [
     { to: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true },
