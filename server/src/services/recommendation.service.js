@@ -1,6 +1,5 @@
 const Service = require('../models/Service');
 const Token = require('../models/Token');
-const mongoose = require('mongoose');
 
 /**
  * Rank services based on congestion score using a single aggregation pipeline.
