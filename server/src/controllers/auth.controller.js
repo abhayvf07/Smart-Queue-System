@@ -3,18 +3,42 @@ const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const logger = require('../utils/logger');
 
+// Startup guard — fail fast if JWT secrets are not configured
+if (!process.env.JWT_ACCESS_SECRET || !process.env.JWT_REFRESH_SECRET) {
+  throw new Error(
+    'FATAL: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must both be set in environment variables. ' +
+    'Using a single shared secret collapses the security model. See .env.example for reference.'
+  );
+}
+
 // Generate Access JWT
 const generateJWT = (id) => {
-  return jwt.sign({ id }, process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET, {
+  return jwt.sign({ id }, process.env.JWT_ACCESS_SECRET, {
     expiresIn: process.env.JWT_ACCESS_EXPIRE || '1h',
   });
 };
 
 // Generate Refresh JWT
 const generateRefreshToken = (id) => {
-  return jwt.sign({ id, type: 'refresh' }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, {
+  return jwt.sign({ id, type: 'refresh' }, process.env.JWT_REFRESH_SECRET, {
     expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d',
   });
+};
+
+// Refresh token cookie options
+const getRefreshCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+  path: '/api/auth', // Only sent to auth endpoints
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+});
+
+/**
+ * Set refresh token as httpOnly cookie on the response.
+ */
+const setRefreshCookie = (res, refreshToken) => {
+  res.cookie('sq_refresh_token', refreshToken, getRefreshCookieOptions());
 };
 
 /**
@@ -71,6 +95,9 @@ const register = async (req, res, next) => {
 
     logger.info(`User registered: ${user.email} (${user.role})`);
 
+    // Set refresh token as httpOnly cookie (not in response body)
+    setRefreshCookie(res, refreshToken);
+
     res.status(201).json({
       success: true,
       message: 'Registration successful!',
@@ -82,7 +109,6 @@ const register = async (req, res, next) => {
           role: user.role,
         },
         token,
-        refreshToken,
       },
     });
   } catch (error) {
@@ -132,6 +158,9 @@ const login = async (req, res, next) => {
 
     logger.info(`User logged in: ${user.email}`);
 
+    // Set refresh token as httpOnly cookie (not in response body)
+    setRefreshCookie(res, refreshToken);
+
     res.status(200).json({
       success: true,
       message: 'Login successful!',
@@ -143,7 +172,6 @@ const login = async (req, res, next) => {
           role: user.role,
         },
         token,
-        refreshToken,
       },
     });
   } catch (error) {
@@ -174,14 +202,15 @@ const getMe = async (req, res, next) => {
  */
 const refreshToken = async (req, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    // Read refresh token from httpOnly cookie (not from request body)
+    const refreshToken = req.cookies?.sq_refresh_token;
 
     if (!refreshToken) {
       throw new ApiError(400, 'Refresh token is required.');
     }
 
     // Verify token
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
     if (decoded.type !== 'refresh') {
       throw new ApiError(401, 'Invalid token type.');
@@ -210,11 +239,13 @@ const refreshToken = async (req, res, next) => {
     if (user.refreshTokens.length > 5) user.refreshTokens = user.refreshTokens.slice(-5);
     await user.save();
 
+    // Set new refresh token as httpOnly cookie
+    setRefreshCookie(res, newRefreshToken);
+
     res.status(200).json({
       success: true,
       data: {
         token: newAccessToken,
-        refreshToken: newRefreshToken,
         user,
       },
     });
@@ -236,10 +267,12 @@ const refreshToken = async (req, res, next) => {
 const logout = async (req, res, next) => {
   try {
     if (req.user) {
-      // Clear all refresh tokens
+      // Clear all refresh tokens from DB
       req.user.refreshTokens = [];
       await req.user.save();
     }
+    // Clear the refresh token cookie
+    res.clearCookie('sq_refresh_token', getRefreshCookieOptions());
     res.status(200).json({ success: true, message: 'Logged out successfully.' });
   } catch (error) {
     next(error);
