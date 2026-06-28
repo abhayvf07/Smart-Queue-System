@@ -10,7 +10,7 @@ const logger = require('../utils/logger');
  */
 const getChatbotResponse = async (user, userMessage) => {
   // Sanitize user input: strip triple-quote sequences and limit length
-  let sanitizedMessage = userMessage
+  const sanitizedMessage = userMessage
     .replace(/"{3,}/g, '')
     .replace(/`{3,}/g, '')
     .replace(/'{3,}/g, '')
