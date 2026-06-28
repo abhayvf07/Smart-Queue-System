@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '../../context/SocketContext';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
@@ -19,7 +19,7 @@ const QueueControl = () => {
   const [selectedServiceId, setSelectedServiceId] = useState('');
   const [queue, setQueue] = useState([]);
   const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
+
   const [actionLoading, setActionLoading] = useState('');
 
   useEffect(() => {
@@ -32,14 +32,12 @@ const QueueControl = () => {
         }
       } catch (err) {
         console.error(err);
-      } finally {
-        setLoading(false);
       }
     };
     fetchServices();
   }, []);
 
-  const fetchQueue = async () => {
+  const fetchQueue = useCallback(async () => {
     if (!selectedServiceId) return;
     try {
       const res = await api.get(`/tokens/queue-status/${selectedServiceId}`);
@@ -48,11 +46,11 @@ const QueueControl = () => {
     } catch (err) {
       console.error(err);
     }
-  };
+  }, [selectedServiceId]);
 
   useEffect(() => {
     fetchQueue();
-  }, [selectedServiceId]);
+  }, [fetchQueue]);
 
   // Real-time updates
   useEffect(() => {
