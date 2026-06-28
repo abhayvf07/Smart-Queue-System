@@ -52,7 +52,7 @@ const getSentimentStats = async (startDate, endDate) => {
 
     const counts = { positive: 0, neutral: 0, frustrated: 0 };
     for (const r of results) {
-      if (counts.hasOwnProperty(r._id)) {
+      if (Object.prototype.hasOwnProperty.call(counts, r._id)) {
         counts[r._id] = r.count;
       }
     }
