@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const morgan = require('morgan');
 
@@ -12,6 +13,7 @@ const errorHandler = require('./middleware/errorHandler');
 const setupSocket = require('./socket/socketHandler');
 const { initNotificationService } = require('./services/notification.service');
 const { cancelExpiredTokens, getQueueForService, getQueueStats, queueEvents } = require('./services/queue.service');
+const { refreshAnomalyCache } = require('./services/anomalyCache');
 const notificationService = require('./services/notification.service');
 const logger = require('./utils/logger');
 
@@ -20,7 +22,7 @@ const tokenRoutes = require('./routes/token.routes');
 const adminRoutes = require('./routes/admin.routes');
 const serviceRoutes = require('./routes/service.routes');
 const chatbotRoutes = require('./routes/chatbot.routes');
-const predictionRoutes = require('./routes/prediction.routes');
+
 
 const app = express();
 const server = http.createServer(app);
@@ -70,6 +72,7 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 app.use(morgan('dev'));
 app.use(apiLimiter);
 
@@ -79,7 +82,7 @@ app.use('/api/tokens', tokenRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/chatbot', chatbotRoutes);
-app.use('/api/predictions', predictionRoutes);
+
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -105,6 +108,7 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 
 let cleanupInterval;
+let anomalyCacheInterval;
 
 const startServer = async () => {
   try {
@@ -120,6 +124,11 @@ const startServer = async () => {
     // Auto-cancel expired tokens every 60 seconds
     cleanupInterval = setInterval(cancelExpiredTokens, 60 * 1000);
     logger.info('⏱️  Expired token cleanup scheduled (every 60s)');
+
+    // Anomaly detection cache — refresh every 2 minutes (off the request path)
+    await refreshAnomalyCache(); // warm cache on startup
+    anomalyCacheInterval = setInterval(refreshAnomalyCache, 2 * 60 * 1000);
+    logger.info('🔍 Anomaly detection cache scheduled (every 2min)');
   } catch (error) {
     logger.error(`Failed to start server: ${error.message}`);
     process.exit(1);
@@ -132,6 +141,7 @@ startServer();
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
   clearInterval(cleanupInterval);
+  clearInterval(anomalyCacheInterval);
   server.close(() => {
     process.exit(0);
   });
